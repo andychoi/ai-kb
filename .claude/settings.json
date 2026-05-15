@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(git status*)",
+      "Bash(git add*)",
+      "Bash(git mv*)",
+      "Bash(git rm*)",
+      "Bash(git commit*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git rev-parse*)",
+      "Bash(git config --get*)",
+      "Bash(python3 -c*)",
+      "Bash(mkdir -p*)",
+      "Bash(ls*)",
+      "Bash(cat*)",
+      "Bash(wc -l*)",
+      "Bash(grep*)",
+      "Bash(find*)",
+      "WebFetch"
+    ],
+    "deny": [
+      "Bash(git push --force*)",
+      "Bash(git reset --hard*)",
+      "Bash(git branch -D*)",
+      "Bash(rm -rf*)",
+      "Bash(git push*)"
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+# Obsidian per-machine state (not the vault content)
+.obsidian/workspace*
+.obsidian/cache/
+.obsidian/plugins/*/data.json
+
+# Trash & OS noise
+.trash/
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.local
+
+# Python / Node detritus that may show up via reused gitweb code
+*.pyc
+__pycache__/
+node_modules/
+
+# Local KB bot identity (may hold tokens)
+.kb/gitconfig
+.kb/*.pid
