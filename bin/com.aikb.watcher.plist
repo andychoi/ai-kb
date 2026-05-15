@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ai-kb file-watch LaunchAgent (Phase 2).
+
+  install-watcher.sh substitutes __VAULT__ with the absolute repo path before
+  copying to ~/Library/LaunchAgents/. Do not load this file in place.
+
+  Per-user agent (not a LaunchDaemon) so it inherits ~/.claude credentials.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aikb.watcher</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__VAULT__/.venv-watcher/bin/python3</string>
+        <string>__VAULT__/bin/kb-watcher.py</string>
+        <string>--vault</string>
+        <string>__VAULT__</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__VAULT__</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__VAULT__/.kb/watcher.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__VAULT__/.kb/watcher.stderr.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
