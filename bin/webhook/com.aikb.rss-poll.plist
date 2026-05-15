@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ai-kb Phase 4 — RSS poll timer. Every 30 minutes.
+
+  StartInterval (vs StartCalendarInterval) because we want a fixed cadence, not
+  wall-clock alignment. launchd skips ticks while the user is asleep / laptop
+  closed; that's fine — we'll catch up on next wake.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aikb.rss-poll</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__VAULT__/.venv-webhook/bin/python3</string>
+        <string>-m</string>
+        <string>bin.webhook.cli</string>
+        <string>rss-poll</string>
+        <string>--vault</string>
+        <string>__VAULT__</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__VAULT__</string>
+
+    <key>StartInterval</key>
+    <integer>1800</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__VAULT__/.kb/rss-poll.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__VAULT__/.kb/rss-poll.stderr.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>KB_VAULT_ROOT</key>
+        <string>__VAULT__</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
