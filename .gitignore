@@ -20,3 +20,10 @@ node_modules/
 # Local KB bot identity (may hold tokens)
 .kb/gitconfig
 .kb/*.pid
+
+# Phase 2 watcher + Phase 3 cron + Phase 4 webhook runtime artifacts
+.kb/*.log
+.kb/*.lock
+.kb/seen.json
+.venv-watcher/
+.venv-webhook/

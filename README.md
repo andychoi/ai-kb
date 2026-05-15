@@ -20,8 +20,11 @@ Notes are small, atomic markdown files (one concept per file) so Claude can edit
 10. [Headless / scripting use](#headless--scripting-use)
 11. [Maintenance & validation](#maintenance--validation)
 12. [Troubleshooting](#troubleshooting)
-13. [Roadmap](#roadmap)
-14. [Conventions you must follow](#conventions-you-must-follow)
+13. [Phase 2 — File-watch daemon](#phase-2--file-watch-daemon)
+14. [Phase 3 — Cron jobs](#phase-3--cron-jobs)
+15. [Phase 4 — Webhook receiver](#phase-4--webhook-receiver)
+16. [Roadmap](#roadmap)
+17. [Conventions you must follow](#conventions-you-must-follow)
 
 ---
 
@@ -310,14 +313,282 @@ chmod +x .git/hooks/pre-commit
 
 ---
 
+## Phase 2 — File-watch daemon
+
+The Phase 2 watcher reacts to drops in `inbox/` and refiles them automatically by shelling out to `/note-refile`. It uses macOS FSEvents (via `watchfiles`) and runs as a launchd LaunchAgent so it inherits your `~/.claude/` credentials.
+
+### Install
+
+```sh
+# 1. Create the watcher's dedicated venv and install dependencies (one-time)
+bin/setup-watcher.sh
+
+# 2. Verify the daemon works (static checks + dry-run cost-gate behavior)
+./verify-phase2.sh
+
+# 3. (Optional) Install as a LaunchAgent that auto-starts on login
+bin/install-watcher.sh
+```
+
+### Manual test (foreground)
+
+```sh
+# Run in the foreground; Ctrl-C to stop.
+.venv-watcher/bin/python3 bin/kb-watcher.py
+
+# In another terminal, drop a note:
+cat > inbox/test.md <<'NOTE'
+# A real test
+
+Real body content, big enough to clear the cost gate.
+NOTE
+
+# Within ~10 seconds the watcher should log the queue + invoke claude.
+```
+
+### Cost gate
+
+Every `inbox/` event firing `claude -p` costs real money. The daemon filters out:
+
+| Skip condition | Why |
+|---|---|
+| File <50 bytes | Likely a mid-write Obsidian autosave |
+| File modified <2s ago | Autosave race; wait for next debounce |
+| File's sha already in `.kb/state.json` `processed{}` | Same content was already attempted; re-saving changes sha and naturally retriggers |
+| Path doesn't end in `.md` | Out of scope |
+| Path deleted | Nothing to do |
+
+The daemon stamps `processed[path]={sha,ts,source:"watch"}` after each invocation (success or failure). This prevents hot-loops if `/note-refile` ever fails — re-saving the file is the explicit retry signal.
+
+### Logs & lifecycle
+
+| File | What |
+|---|---|
+| `.kb/watcher.log` | Application log (rotated only when launchd restarts the process) |
+| `.kb/watcher.stdout.log` | launchd-captured stdout |
+| `.kb/watcher.stderr.log` | launchd-captured stderr |
+| `.kb/watcher.pid` | Single-instance guard |
+
+All four are `.gitignored`.
+
+### Uninstall
+
+```sh
+bin/uninstall-watcher.sh    # remove the LaunchAgent
+rm -rf .venv-watcher        # remove the venv (optional)
+```
+
+### Tunables
+
+```sh
+# Override the debounce window (default 8s):
+.venv-watcher/bin/python3 bin/kb-watcher.py --debounce 5
+
+# Process the current inbox once and exit (useful as a cron alternative):
+.venv-watcher/bin/python3 bin/kb-watcher.py --once
+
+# Test mode — log decisions but never invoke claude:
+.venv-watcher/bin/python3 bin/kb-watcher.py --dry-run
+```
+
+---
+
+## Phase 3 — Cron jobs
+
+Three launchd `LaunchAgent` timers handle time-driven maintenance. Each job pulls from origin first, runs its work, and pushes after — so the vault on Gitea stays in sync without manual `git push`.
+
+| Job | Schedule | What it does |
+|---|---|---|
+| `daily.sh` | 00:05 local | `claude -p "/daily"` (idempotent — no-ops if today's note already exists) |
+| `weekly.sh` | Sun 03:00 local | `/kb-stats --json` → `.kb/stats/<YYYY>-W<WW>.json`; `/kb-validate` for drift |
+| `monthly.sh` | 1st @ 04:00 local | Archives `inbox/*.md >30d` → `inbox/_archive/<YYYY-MM>/`; `work/**/*.md` with `status: done >90d` → `work/_archive/<YYYY-MM>/` |
+
+### Install
+
+```sh
+# Install all three LaunchAgents at once
+bin/cron/install-cron.sh
+
+# View install status
+launchctl print "gui/$(id -u)/com.aikb.daily" | head -20
+```
+
+### Bot identity
+
+Cron jobs export `GIT_AUTHOR_NAME=kb-bot` and `GIT_AUTHOR_EMAIL=kb-bot@local` (from `.env` if set; default `kb-bot`/`kb-bot@local`) before invoking `claude -p` or `git`. This means automation commits show `kb-bot` in `git log --author`, distinct from your interactive commits. See `CLAUDE.md` §7.
+
+### Manual run / dry-run
+
+```sh
+# Dry-run any job (no claude calls, no push)
+DRY_RUN=1 bin/cron/daily.sh
+DRY_RUN=1 bin/cron/weekly.sh
+DRY_RUN=1 bin/cron/monthly.sh
+
+# Real run (requires claude on PATH + your auth; will pull/push if origin set)
+bin/cron/daily.sh
+tail -f .kb/cron-daily.log   # in another terminal
+
+# Force a scheduled job to fire NOW (useful for testing the LaunchAgent path)
+launchctl kickstart -k gui/$(id -u)/com.aikb.daily
+```
+
+### Archive layout
+
+The monthly job creates `inbox/_archive/<YYYY-MM>/` and `work/_archive/<YYYY-MM>/`. The Phase 2 watcher's cost-gate explicitly skips `_archive/` paths so archived notes don't get re-processed. The archive folders are committed to git — they're part of the vault, just dormant.
+
+### Concurrency
+
+Each cron job acquires a per-job lockfile (`.kb/cron-<job>.lock`) at start and releases on exit. If a second tick fires while one is running (rare), the second exits immediately. Locks are also released on crash via `trap EXIT`.
+
+### Logs
+
+| File | What |
+|---|---|
+| `.kb/cron-daily.log` (and `weekly`, `monthly`) | Application log, append-only |
+| `.kb/cron-<job>.stdout.log` / `.stderr.log` | launchd-captured (rotated by launchd) |
+
+All gitignored.
+
+### Uninstall
+
+```sh
+bin/cron/uninstall-cron.sh
+```
+
+---
+
+## Phase 4 — Webhook receiver
+
+A small FastAPI server that accepts external triggers (GitHub, email, RSS) and writes them to `inbox/` with `source: webhook:<name>` and a stable `idem_key`. Phase 2 daemon picks them up and refiles. Same single-ingest contract as the other phases.
+
+### Endpoints
+
+| Endpoint | Auth | What it does |
+|---|---|---|
+| `GET /healthz` | none | Liveness — returns vault path and whether `state.json` is present |
+| `POST /webhook/github` | HMAC-SHA256 on body (`X-Hub-Signature-256`) | Maps `push` / `release` / `issues` events to inbox notes; idempotency key = `X-GitHub-Delivery` |
+| `POST /webhook/rss/refresh` | bearer token (`KB_ADMIN_TOKEN`) | Triggers a poll of every configured feed in `.kb/feeds.json` |
+| `POST /email/inbound` | bearer token (`KB_EMAIL_TOKEN`) | Accepts JSON-forwarded email (Mailgun, SES, custom MTA hook); idempotency key = `Message-ID` |
+
+### Install
+
+```sh
+# 1. Create the webhook venv and install deps (one-time)
+bin/webhook/setup-webhook.sh
+
+# 2. Configure secrets (NOT committed — .env is .gitignored)
+cat >> .env <<EOF
+KB_WEBHOOK_PORT=8765
+GITHUB_WEBHOOK_SECRET=$(openssl rand -hex 32)
+KB_EMAIL_TOKEN=$(openssl rand -hex 32)
+KB_ADMIN_TOKEN=$(openssl rand -hex 32)
+EOF
+
+# 3. (Optional) Configure RSS feeds (committed)
+cat > .kb/feeds.json <<JSON
+[
+  {"name": "Hacker News", "url": "https://hnrss.org/frontpage", "tags": ["hn"]}
+]
+JSON
+
+# 4. Verify everything works (no network, no claude needed)
+./verify-phase4.sh
+
+# 5. Install as LaunchAgents (HTTP server + RSS poll every 30 min)
+bin/webhook/install-webhook.sh
+```
+
+### Manual test
+
+```sh
+# Foreground server (Ctrl-C to stop)
+.venv-webhook/bin/python3 -m bin.webhook.cli serve
+
+# Health check
+curl -s http://127.0.0.1:8765/healthz | python3 -m json.tool
+
+# Trigger an RSS poll manually
+launchctl kickstart -k gui/$(id -u)/com.aikb.rss-poll
+tail -f .kb/rss-poll.stdout.log
+
+# Send a test GitHub push payload
+body='{"ref":"refs/heads/main","repository":{"full_name":"a/b"},"sender":{"login":"alice"},"commits":[]}'
+sig="sha256=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$GITHUB_WEBHOOK_SECRET" | awk '{print $2}')"
+curl -X POST http://127.0.0.1:8765/webhook/github \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: push" \
+  -H "X-GitHub-Delivery: $(uuidgen)" \
+  -H "X-Hub-Signature-256: $sig" \
+  -d "$body"
+```
+
+### Idempotency model
+
+Every handler derives a stable `idem_key` from a source-specific ID:
+
+| Source | Idempotency key derived from |
+|---|---|
+| GitHub | `X-GitHub-Delivery` header (GitHub re-uses this on retries) |
+| RSS | `sha256(feed_url + entry_guid)` |
+| Email | `Message-ID` header (RFC 5322; globally unique) |
+
+The shared `ingest()` checks both `.kb/state.json` `idempotency{}` AND `git log --grep=[<key>]` before writing. If either says we've seen the key, the request returns `status: skipped` and produces no note. State.json wipe still recovers via git log — verified by `verify-phase4.sh`.
+
+### Security notes
+
+- **Binding**: server listens on `127.0.0.1` only. To expose externally, put a reverse proxy in front (Caddy / nginx / Tailscale Funnel) — never bind to `0.0.0.0` directly.
+- **GitHub HMAC** is verified constant-time. Without `GITHUB_WEBHOOK_SECRET` set, the endpoint returns 503 (not 200) — fail-closed.
+- **Email bearer** uses `hmac.compare_digest` for constant-time comparison.
+- **RSS** is pull-only; no auth surface there. The `/webhook/rss/refresh` admin endpoint is bearer-protected.
+- `.env` is `.gitignored`; secrets never enter the repo.
+
+### Tunables
+
+```sh
+# Custom port (default 8765 from $KB_WEBHOOK_PORT)
+.venv-webhook/bin/python3 -m bin.webhook.cli serve --port 9000
+
+# One-shot RSS poll without starting the server
+.venv-webhook/bin/python3 -m bin.webhook.cli rss-poll
+
+# View server version
+.venv-webhook/bin/python3 -m bin.webhook.cli version
+```
+
+### Files & logs
+
+| File | What |
+|---|---|
+| `.kb/feeds.json` | RSS feed config (committed) |
+| `.kb/seen.json` | Per-feed last-seen entry IDs (gitignored) |
+| `.kb/webhook-serve.log` | Server application log |
+| `.kb/webhook-rss-poll.log` | RSS poll application log |
+| `.kb/webhook-stdout.log` / `.stderr.log` | launchd-captured server output |
+| `.kb/rss-poll.stdout.log` / `.stderr.log` | launchd-captured RSS poll output |
+
+### Uninstall
+
+```sh
+bin/webhook/uninstall-webhook.sh
+rm -rf .venv-webhook          # optional
+```
+
+---
+
 ## Roadmap
 
-- **Phase 1 (now)** — vault foundation + on-demand slash commands. *You are here.*
-- **Phase 2** — file-watch daemon: drops into `inbox/` auto-refile. Daemon shells `claude -p "/note-refile"` with 5–10s debounce; cheap pre-filter (size/regex) before invoking Claude to control cost. launchd (macOS) / systemd (Linux).
-- **Phase 3** — cron (launchd/systemd timers). Daily: `/daily` + RSS pull → `inbox/`. Weekly: `/kb-stats` + orphan sweep + summary of week's daily notes. Monthly: archive aged inbox + completed work.
-- **Phase 4** — webhook receiver (FastAPI). Endpoints: `/webhook/github`, `/webhook/rss`, `/email/inbound`. Writes to `inbox/` with `source: webhook:<name>` + ULID `idem_key` → Phase 2 daemon picks them up and refiles.
+- **Phase 1** — vault foundation + on-demand slash commands. ✅
+- **Phase 2** — file-watch daemon. ✅
+- **Phase 3** — cron (launchd timers). ✅
+- **Phase 4** — webhook receiver. ✅
 
-Each phase ships value on its own. Phase 2 adds passive ingestion; Phase 3 adds time-driven maintenance; Phase 4 adds external sourcing. None require redesigning Phase 1 because the *contracts* (`inbox/`-first, headless commands, `.kb/state.json` schema, commit-message grammar) are locked now.
+All four phases shipped. The architecture's load-bearing decisions — `inbox/`-first single-ingest contract, headless slash commands, frozen `.kb/state.json` schema, idempotency-keyed commit grammar — held without modification across every phase.
+
+**Next adventures, not part of the original plan:**
+- Mobile editing path (Obsidian mobile or gitweb companion against the Gitea repo).
+- A Phase 2.1 "rich pre-filter" if Claude headless cost gets uncomfortable — e.g., a tiny local classifier that decides whether a note even needs Claude.
+- A `/kb-search` slash command for semantic vault search if Dataview becomes insufficient.
 
 ---
 
