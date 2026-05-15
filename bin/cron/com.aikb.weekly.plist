@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ai-kb Phase 3 — weekly cron job. Runs Sunday 03:00 local time.
+  Weekday: 0 = Sunday in launchd's StartCalendarInterval.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aikb.weekly</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__VAULT__/bin/cron/weekly.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__VAULT__</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__VAULT__/.kb/cron-weekly.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__VAULT__/.kb/cron-weekly.stderr.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
