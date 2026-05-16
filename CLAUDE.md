@@ -18,6 +18,7 @@ This is a Claude-Code-driven Obsidian knowledge base. The source of truth is thi
 | `refs/{people,tools,concepts}/` | Stable reference notes. Long-lived; rarely change. | Direct write OK once stabilized; otherwise `inbox/` → refile. |
 | `daily/` | `YYYY-MM-DD.md` daily notes. | Only via `/daily`. |
 | `templates/` | One `.md` per note type. All slash commands that create notes copy from these. | Don't modify without bumping `schema_version` in `.kb/state.json` and updating §3 below. |
+| `clusters/` | Auto-generated MOC notes (one per cluster from `/kb-cluster`) plus `_index.md`. | **Never write directly.** Only `/kb-cluster` mutates this folder; manual edits are lost on next run. |
 
 **Single ingest contract**: every new note starts in `inbox/` with frontmatter `source: manual|watch|webhook:<name>` and an `idem_key` (ULID). Refile promotes it. This collapses 3 pipelines (manual / watch / webhook) into 1.
 
@@ -96,7 +97,7 @@ idem_key: 01HKZX1234567890ABCDEFGHJK   # often equals id; differs for re-ingesti
 kb: <verb> <scope> [<idem_key>]
 ```
 
-- **`<verb>`** ∈ {`add`, `refile`, `rename`, `split`, `link`, `update`, `archive`, `validate`, `daily`, `stats`, `init`}
+- **`<verb>`** ∈ {`add`, `refile`, `rename`, `split`, `link`, `update`, `archive`, `validate`, `daily`, `stats`, `init`, `cluster`}
 - **`<scope>`**: short noun phrase identifying what was touched (`inbox/foo`, `code/ai-kb`, `daily/2026-05-15`).
 - **`<idem_key>`**: optional trailing ULID, in square brackets, when the change corresponds to an idempotent ingest. Lets `git log --grep=<key>` detect prior delivery even if `.kb/state.json` is wiped.
 
@@ -144,10 +145,14 @@ Phase 2's file-watch daemon literally shells out to `claude -p` to drive refile.
 When walking the vault (`/kb-validate`, `/kb-stats`, `/note-link` candidate search), skip:
 
 ```
-.git, .obsidian, .claude, .kb, .trash, templates, node_modules, __pycache__
+.git, .obsidian, .claude, .kb, .trash, templates, node_modules, __pycache__, docs
 ```
 
 `templates/` is skipped because its frontmatter is *example* frontmatter, not vault content. Including it triggers false ID-collision warnings.
+
+`docs/` is skipped because it holds project meta (design specs, ADRs about the vault itself), not vault content.
+
+`clusters/` is **walked for ID uniqueness and frontmatter validation** (cluster MOC IDs must be unique vault-wide), but **excluded from orphan detection** (auto-generated indexes are always orphans by construction) and **excluded from `/note-link` candidate scoring** (we don't want auto-MOCs suggested as related notes).
 
 ---
 
