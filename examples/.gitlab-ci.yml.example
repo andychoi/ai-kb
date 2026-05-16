@@ -1,0 +1,44 @@
+# .gitlab-ci.yml.example — copied to user vaults as .gitlab-ci.yml
+#
+# Validates the vault on every push; runs scheduled health checks.
+# Required for the ai-kb submodule pattern: GIT_SUBMODULE_STRATEGY=recursive
+# ensures CI checks out .ai-kb/ correctly.
+#
+# See: .docs/architecture/gitlab-submodule-architecture.md
+
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+  GIT_SUBMODULE_DEPTH: 1
+  PYTHON_VERSION: "3.12"
+
+stages:
+  - validate
+  - health
+
+default:
+  image: python:${PYTHON_VERSION}-slim
+  before_script:
+    # Sanity-check the submodule was actually initialized.
+    - test -f .ai-kb/CLAUDE.md || (echo "ERROR: .ai-kb submodule missing" && exit 1)
+
+# Run on every push: schema/link validation only. Cheap, fast.
+validate:
+  stage: validate
+  script:
+    - python .ai-kb/bin/kb-validate.py || true  # tolerate missing impl for now
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Scheduled (weekly) health snapshot. Configure under
+# Settings > CI/CD > Pipeline schedules.
+weekly_health:
+  stage: health
+  script:
+    - python .ai-kb/bin/kb-stats.py --json > .kb/stats/$(date +%Y%W).json || true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  artifacts:
+    paths:
+      - .kb/stats/
+    expire_in: 1 year

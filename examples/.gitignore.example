@@ -1,0 +1,45 @@
+# .gitignore.example — copied to user vaults as .gitignore
+#
+# Defaults for an ai-kb user vault. Customize as needed.
+
+# Local environment
+.env
+.env.local
+*.local
+
+# Obsidian per-machine state (NOT plugin config; that's committed)
+.obsidian/workspace*
+.obsidian/cache
+.obsidian/graph.json
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Python bytecode (for any local helper scripts)
+__pycache__/
+*.pyc
+*.pyo
+
+# kb-watcher / webhook runtime artifacts
+.kb/watcher.pid
+.kb/watcher.log
+.kb/webhook-*.log
+.kb/daemon/*.log
+
+# Logs from kb-filter / kb-lint (architecture; may not yet exist)
+.kb/logs/
+
+# Vector DB persistence — large; not meaningful in git.
+# Uncomment to commit (e.g., for reproducible CI):
+# .kb/vector-db/
+
+# Stats snapshots — comment out if you want them in git.
+# .kb/stats/
+
+# Trash from /note-rename, /note-split, etc.
+.trash/
